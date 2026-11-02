@@ -1,0 +1,5 @@
+# Normalise line endings in the repository; checkout uses the platform default.
+* text=auto
+*.bat text eol=crlf
+*.gif binary
+*.png binary

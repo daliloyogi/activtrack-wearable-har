@@ -1,0 +1,4 @@
+{
+  "firebase_db_url": "https://<project>-default-rtdb.<region>.firebasedatabase.app/",
+  "firebase_key": "serviceAccountKey.json"
+}
