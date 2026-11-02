@@ -12,8 +12,10 @@
  *
  * Bacaan dibuat di loop() (core 1, cloudLoop) tiap intervalSec dari laporan node 5 s, jadi tidak
  * pernah tertunda oleh jaringan. Kerja jaringan (WiFi, jam NTP, HTTP) di task sendiri di core 0.
- * Buzzer: aturan dari web dihitung di GS (runSec >= thresholdMinutes*60, posisi lain = reset),
- * hasilnya ikut tiap bacaan dan membunyikan buzzer node.
+ * Buzzer: dihitung di GS, hasilnya ikut tiap bacaan dan membunyikan buzzer node. Duduk DAN berdiri
+ * selalu diawasi (runSec >= ambang*60, berpindah posisi = hitung ulang, aktivitas lain = reset).
+ * Ambang default keduanya BUZZ_DEFAULT_MIN (1) menit; buzzerRule dari web (satu posisi) hanya
+ * menggantikan ambang posisinya, posisi lain tetap default.
  * WiFi: jaringan pilihan GS (flash "wifi") atau secrets.h; host database di secrets.h.
  */
 #include <stddef.h>
@@ -79,14 +81,16 @@ struct CloudNode
 {
   char did[CLOUD_DID_MAX + 1];
   CloudSess sess;
-  bool watchSitting;    // aturan buzzer: true = sitting, false = standing
-  uint8_t thresholdMin; // menit
+  bool watchSitting;    // posisi yang sedang dihitung: true = sitting, false = standing
+  uint8_t thresholdMin; // ambang posisi itu (menit)
+  uint8_t thrSitMin;    // ambang duduk (default BUZZ_DEFAULT_MIN, atau buzzerRule web)
+  uint8_t thrStandMin;  // ambang berdiri (idem)
   uint16_t intervalSec;
   bool buzzer;          // aturan terpenuhi pada bacaan terakhir -> buzzer node ON
   uint16_t runMin;      // lama posisi yang diawasi (menit, untuk tampilan "duduk 21m")
   uint32_t runSec;       // sama, dalam detik (presisi penuh; buzz_stage.h butuh ini untuk tingkat 30/60 dtk)
   uint16_t queued;      // bacaan belum terkirim
-  uint32_t gen;          // naik tiap seri (ssid) baru; GS pakai ini mereset hitungan pelanggaran berulang
+  uint32_t gen;          // naik tiap seri (ssid) baru
 };
 
 void cloudBegin();               // sekali di setup()

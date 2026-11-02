@@ -202,7 +202,7 @@ struct __attribute__((packed)) Cmd
   uint8_t cal;         // 1 = mulai kalibrasi; ditahan sampai node terlihat mulai / selesai
   uint8_t mode;        // 0 = DEBUG, 1 = PRODUCTION
   uint8_t buzz;        // tingkat buzzer node (mode PROD): 0 mati, 1..BUZZ_STAGES = makin sering/keras
-                       // (overtime + hitungan pelanggaran berulang dalam sesi, lihat webSync())
+                       // (dari overtime, lihat buzz_stage.h & webSync())
 };
 
 // Fitur satu jendela dari node, terpecah dalam FEAT_PARTS FeatPacket (HARUS identik dengan node)
@@ -340,9 +340,8 @@ uint8_t demoSel = 0;        // baris terpilih (0..2 = tingkat 1..3, UI_DEMO_ALL 
 uint8_t demoStage = 0;      // tingkat yang sedang dibunyikan, 0 = diam
 uint32_t demoT0 = 0;        // mulai tingkat ini (satu tingkat) / mulai urutan (semua)
 uint32_t demoLastBeep = 0;
-// Buzzer node (mode PROD): tingkat 0..BUZZ_STAGES dari overtime + pelanggaran berulang (buzz_stage.h)
+// Buzzer node (mode PROD): tingkat 0..BUZZ_STAGES dari overtime (buzz_stage.h)
 uint8_t nodeBuzzStage[NUM_NODES] = {0, 0}; // ikut Cmd
-BuzzTracker buzzTrack[NUM_NODES] = {};
 uint8_t setMenu = UI_MENU_TOP; // menu SETTING yang terbuka
 // Layar KONEKSI saat boot (lihat netCheckStart)
 #define NET_CHECK_MS 20000       // tunggu online maksimal
@@ -1159,7 +1158,7 @@ void settingEnter()
       demoSel = 0;
     }
     else
-    { // aturan buzzer node datang dari web (buzzerRule di /deviceState)
+    { // ambang buzzer node: default duduk & berdiri 1 mnt, buzzerRule web (/deviceState) menggantikan satu posisi
       showToast("Diatur dari web");
       beep(1, 15);
     }
@@ -1534,7 +1533,8 @@ void fillUiNode(UiNode &u, uint8_t idx, uint32_t now)
   u.sess = cn.sess;
   u.buzzStage = nodeBuzzStage[idx]; // tingkat yang sama dengan yang dikirim ke node (Cmd.buzz)
   u.watchSit = cn.watchSitting;
-  u.thrMin = cn.thresholdMin;
+  u.thrSit = cn.thrSitMin;
+  u.thrStand = cn.thrStandMin;
   u.runMin = cn.runMin;
   u.queued = cn.queued;
 }
@@ -1635,7 +1635,7 @@ void webSync()
     bool want = cn.sess == SESS_RECORDING;
     if (want != wantRun[i])
       setRun(i, want, "web");
-    uint8_t stage = buzzStageFor(buzzTrack[i], cn);
+    uint8_t stage = buzzStageFor(cn);
     if (demoStage)
       continue; // demo alarm memegang tingkat buzzer node
     if (stage != nodeBuzzStage[i])
@@ -1646,11 +1646,7 @@ void webSync()
       if (justStarted)
       { // aturan terpenuhi: GS ikut memberi tahu (buzzer node berbunyi lewat Cmd)
         beep(3, 200, 150);
-        if (buzzTrack[i].offenseCount > 1)
-          showToast("N%u %s lagi! (ke-%u)", i + 1, cn.watchSitting ? "duduk" : "berdiri",
-                    buzzTrack[i].offenseCount);
-        else
-          showToast("N%u %s %u mnt!", i + 1, cn.watchSitting ? "duduk" : "berdiri", cn.runMin);
+        showToast("N%u %s %u mnt!", i + 1, cn.watchSitting ? "duduk" : "berdiri", cn.runMin);
       }
     }
   }

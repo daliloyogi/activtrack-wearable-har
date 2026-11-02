@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include "cloud.h"
+#include "buzz_stage.h"
 #include "cloud_ca.h"
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -41,8 +42,6 @@ static const char *const DEFAULT_DID[CLOUD_NODES] = {"W-01", "W-02"};
 
 // Kode aktivitas node (0 Sitting, 1 Standing, ...) -> label web (huruf kecil, persis)
 static const char *const LABEL[CLOUD_ACTS] = {"sitting", "standing", "walking", "running"};
-#define ACT_SITTING 0
-#define ACT_STANDING 1
 
 // Database: produksi HTTPS; emulator di jaringan lokal untuk uji (panduan §15.2) jika
 // FB_EMULATOR_HOST ("ip:9000") & FB_EMULATOR_NS didefinisikan di secrets.h
@@ -68,8 +67,8 @@ struct DevState // isi /deviceState/{did}
 {
   bool active;
   char ssid[CLOUD_SSID_MAX];
-  bool watchSit;
-  uint8_t thr;
+  uint8_t thrSit;   // ambang duduk (menit): BUZZ_DEFAULT_MIN, atau buzzerRule web bila rule = sitting
+  uint8_t thrStand; // ambang berdiri (menit): BUZZ_DEFAULT_MIN, atau buzzerRule web bila rule = standing
   uint16_t interval;
   uint16_t uploadEvery;
 };
@@ -80,8 +79,8 @@ struct Shared
   char did[CLOUD_DID_MAX + 1];
   CloudSess sess;
   uint32_t gen; // naik tiap seri baru: antrean dikosongkan
-  bool watchSit;
-  uint8_t thr;
+  uint8_t thrSit;
+  uint8_t thrStand;
   uint16_t interval;
   Reading ring[RING];
   uint16_t head, count;
@@ -106,6 +105,7 @@ struct Tick
   uint32_t gen;
   uint32_t nextTs; // ts bacaan berikutnya (0 = belum mulai)
   uint32_t runSec; // lama posisi yang diawasi (panduan §8)
+  uint8_t pos;     // posisi yang sedang dihitung runSec (label), BUZZ_POS_NONE = tidak ada
   bool buzzer;
   uint16_t cnt[CLOUD_ACTS]; // laporan node sejak bacaan terakhir
   uint32_t confSum[CLOUD_ACTS];
@@ -291,8 +291,8 @@ static void publish(uint8_t i)
   CloudSess s = x.recording ? SESS_RECORDING : x.flushing ? SESS_FLUSHING : x.known ? SESS_IDLE : SESS_UNKNOWN;
   portENTER_CRITICAL(&mux);
   sh[i].sess = s;
-  sh[i].watchSit = x.st.watchSit;
-  sh[i].thr = x.st.thr;
+  sh[i].thrSit = x.st.thrSit;
+  sh[i].thrStand = x.st.thrStand;
   sh[i].interval = x.st.interval;
   memcpy(sh[i].did, x.did, sizeof(sh[i].did));
   portEXIT_CRITICAL(&mux);
@@ -310,8 +310,8 @@ static void startSeries(uint8_t i)
   x.backoffMs = 0;
   x.deny = 0;
   dropAll(i); // seri baru = antrean kosong
-  cloudLog("N%u (%s): MULAI seri %s, aturan %s %u mnt, %u s, kirim %u s", i + 1, x.did, x.series,
-           x.st.watchSit ? "sitting" : "standing", x.st.thr, x.st.interval, x.st.uploadEvery);
+  cloudLog("N%u (%s): MULAI seri %s, ambang duduk %u mnt, berdiri %u mnt, %u s, kirim %u s", i + 1, x.did,
+           x.series, x.st.thrSit, x.st.thrStand, x.st.interval, x.st.uploadEvery);
 }
 
 static void stopSeries(uint8_t i)
@@ -335,7 +335,7 @@ static void resetNode(uint8_t i)
   memcpy(did, x.did, sizeof(did));
   memset(&x, 0, sizeof(x));
   memcpy(x.did, did, sizeof(did));
-  x.st.watchSit = true;
+  x.st.thrSit = x.st.thrStand = BUZZ_DEFAULT_MIN;
   x.dirty = true;
   dropAll(i);
   publish(i);
@@ -344,8 +344,7 @@ static void resetNode(uint8_t i)
 static bool parseState(const String &json, DevState &n)
 {
   memset(&n, 0, sizeof(n));
-  n.watchSit = true;
-  n.thr = 20;
+  n.thrSit = n.thrStand = BUZZ_DEFAULT_MIN; // default: duduk & berdiri sama-sama diawasi
   n.interval = 5;
   n.uploadEvery = 30;
   JsonDocument doc;
@@ -355,9 +354,15 @@ static bool parseState(const String &json, DevState &n)
     return true; // belum pernah dipakai: tidak aktif
   n.active = doc["active"] | false;
   strlcpy(n.ssid, doc["ssid"] | "", sizeof(n.ssid));
-  const char *rule = doc["buzzerRule"]["rule"] | "sitting";
-  n.watchSit = strcmp(rule, "standing") != 0;
-  n.thr = (uint8_t)clampL(doc["buzzerRule"]["thresholdMinutes"] | 20, 1, 240);
+  if (doc["buzzerRule"].is<JsonObjectConst>())
+  { // aturan web hanya menggantikan ambang posisinya; posisi lain tetap default
+    const char *rule = doc["buzzerRule"]["rule"] | "sitting";
+    uint8_t thr = (uint8_t)clampL(doc["buzzerRule"]["thresholdMinutes"] | 20, 1, 240);
+    if (strcmp(rule, "standing") == 0)
+      n.thrStand = thr;
+    else
+      n.thrSit = thr;
+  }
   n.interval = (uint16_t)clampL(doc["intervalSec"] | 5, 1, 3600);
   n.uploadEvery = (uint16_t)clampL(doc["uploadEverySec"] | 30, 1, 3600);
   if (!n.ssid[0])
@@ -667,7 +672,7 @@ static void loadDids()
     snprintf(key, sizeof(key), "did%u", i + 1);
     String v = p.getString(key, "");
     strlcpy(nn[i].did, cloudValidDeviceId(v.c_str()) ? v.c_str() : DEFAULT_DID[i], sizeof(nn[i].did));
-    nn[i].st.watchSit = true;
+    nn[i].st.thrSit = nn[i].st.thrStand = BUZZ_DEFAULT_MIN;
     nn[i].dirty = true;
     publish(i);
     cloudLog("N%u = device \"%s\"", i + 1, nn[i].did);
@@ -946,14 +951,13 @@ void cloudLoop()
     Tick &t = tk[i];
     CloudSess sess;
     uint32_t gen;
-    bool watchSit;
-    uint8_t thr;
+    uint8_t thrSit, thrStand;
     uint16_t iv;
     portENTER_CRITICAL(&mux);
     sess = sh[i].sess;
     gen = sh[i].gen;
-    watchSit = sh[i].watchSit;
-    thr = sh[i].thr;
+    thrSit = sh[i].thrSit;
+    thrStand = sh[i].thrStand;
     iv = sh[i].interval ? sh[i].interval : 5;
     portEXIT_CRITICAL(&mux);
 
@@ -961,6 +965,7 @@ void cloudLoop()
     { // IDLE / FLUSHING: tidak merekam, buzzer mati, hitungan direset (§5)
       t.rec = false;
       t.runSec = 0;
+      t.pos = BUZZ_POS_NONE;
       t.buzzer = false;
       continue;
     }
@@ -969,6 +974,7 @@ void cloudLoop()
       memset(&t, 0, sizeof(t));
       t.rec = true;
       t.gen = gen;
+      t.pos = BUZZ_POS_NONE;
     }
     if (nowS < EPOCH_VALID)
       continue; // tanpa jam tidak merekam (§6)
@@ -989,9 +995,9 @@ void cloudLoop()
     Reading r;
     if (makeReading(t, iv, nowMs, r.label, r.conf))
     { // aturan buzzer (§8): posisi diawasi bertambah, posisi lain reset, ON jika >= ambang
-      uint8_t watched = watchSit ? ACT_SITTING : ACT_STANDING;
-      t.runSec = r.label == watched ? t.runSec + iv : 0;
-      t.buzzer = t.runSec >= thr * 60UL;
+      // (duduk DAN berdiri diawasi, ambang masing-masing; lihat buzz_stage.h)
+      buzzAdvance(t.runSec, t.pos, r.label, iv);
+      t.buzzer = t.pos != BUZZ_POS_NONE && t.runSec >= buzzThresholdFor(t.pos, thrSit, thrStand) * 60UL;
       r.ts = t.nextTs;
       r.buzzer = t.buzzer;
       portENTER_CRITICAL(&mux);
@@ -1060,8 +1066,8 @@ CloudNode cloudNode(uint8_t idx)
   portENTER_CRITICAL(&mux);
   memcpy(n.did, sh[idx].did, sizeof(n.did));
   n.sess = sh[idx].sess;
-  n.watchSitting = sh[idx].watchSit;
-  n.thresholdMin = sh[idx].thr;
+  n.thrSitMin = sh[idx].thrSit;
+  n.thrStandMin = sh[idx].thrStand;
   n.intervalSec = sh[idx].interval;
   n.queued = sh[idx].count;
   n.gen = sh[idx].gen;
@@ -1071,6 +1077,9 @@ CloudNode cloudNode(uint8_t idx)
   n.buzzer = rec && t.buzzer;
   n.runMin = rec ? t.runSec / 60 : 0;
   n.runSec = rec ? t.runSec : 0;
+  // posisi yang sedang dihitung (teks "duduk"/"berdiri" di OLED) dan ambangnya (dipakai buzz_stage.h)
+  n.watchSitting = !rec || t.pos != 1;
+  n.thresholdMin = buzzThresholdFor(rec ? t.pos : BUZZ_POS_NONE, n.thrSitMin, n.thrStandMin);
   return n;
 }
 

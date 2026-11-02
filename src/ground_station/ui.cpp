@@ -677,11 +677,11 @@ static void cloudText(char *b, size_t n, const UiState &s)
   }
 }
 
-// Aturan buzzer node dari web ("duduk 20m"), "-" = tidak ada sesi
+// Ambang buzzer node ("D1m B20m" = duduk 1 mnt, berdiri 20 mnt), "-" = tidak ada sesi
 static void ruleText(char *b, size_t n, const UiNode &u)
 {
   if (u.sess == UI_SESS_RECORDING || u.sess == UI_SESS_FLUSHING)
-    snprintf(b, n, "%s %um", u.watchSit ? "duduk" : "berdiri", u.thrMin);
+    snprintf(b, n, "D%um B%um", u.thrSit, u.thrStand);
   else
     snprintf(b, n, "-");
 }

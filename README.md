@@ -62,7 +62,11 @@ cp src/ground_station/secrets_example.h src/ground_station/secrets.h
 
 ### Staged buzzer alarm
 
-Once the dashboard rule is exceeded (e.g. "sitting 20 min") the node buzzer escalates through
+**Default rule:** the ground station always watches **both sitting and standing**, each with a
+1-minute limit. A `buzzerRule` from the dashboard (one position, its own limit) replaces the limit
+of *that position only*; the other position keeps the 1-minute default.
+
+Once the rule is exceeded (e.g. "sitting 20 min") the node buzzer escalates through
 three stages. Every stage uses the same 200 ms beep; only the repeat interval shortens.
 
 | Stage | Name | When | Beep interval |
@@ -71,9 +75,19 @@ three stages. Every stage uses the same 200 ms beep; only the repeat interval sh
 | 2 | Warning | 30–60 s over the limit | 3 s |
 | 3 | Penalty | more than 60 s over the limit | 1 s |
 
-Repeated violations within one session jump straight to a higher stage.
+The alarm stops as soon as the position changes, and the next violation starts again at stage 1.
 To demonstrate the sounds without a session, use **SETTING → Buzzer → Demo alarm** on the
 ground station.
+
+### Tests
+
+`test/test_buzz_stage.cpp` is a host-side test (no hardware) of the staged alarm timeline:
+silent for the first 60 s, stage 1 at 60 s, stage 2 at 90 s, stage 3 at 120 s, reset on
+movement. Build it with any C++17 compiler:
+
+```bash
+c++ -std=c++17 -I src/ground_station test/test_buzz_stage.cpp -o test_buzz && ./test_buzz
+```
 
 ## PC app
 

@@ -166,7 +166,7 @@ const uint16_t BATT_LOW_MV = 3400; // alarm baterai lemah
 #define RES_AGGREGATED 0x10 // PROD: gabungan beberapa jendela (prob = porsi suara per kelas)
 #define RES_POSTURE 0x20    // aturan sumbu paha mengubah tebakan Sitting/Standing model
 // PROD: buzzer sesi web, tingkat 1..3 dari Cmd.buzz (0 = mati), 1 menit sampai tingkat maks
-// (GS: overtime + pelanggaran berulang, lihat buzz_stage.h & webSync() di ground station):
+// (GS: dari overtime, lihat buzz_stage.h & webSync() di ground station):
 //   1 pemberitahuan (0-30 dtk) : beep 0,2 dtk tiap 5 dtk
 //   2 peringatan    (30-60 dtk): beep 0,2 dtk tiap 3 dtk
 //   3 hukuman       (>= 60 dtk): beep 0,2 dtk tiap 1 dtk

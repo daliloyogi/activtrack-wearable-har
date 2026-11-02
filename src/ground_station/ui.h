@@ -160,8 +160,9 @@ struct UiNode
   char did[41];     // device ID
   uint8_t sess;     // UiSess
   uint8_t buzzStage; // 0 = normal, 1 pemberitahuan, 2 peringatan, 3 hukuman (buzz_stage.h BUZZ_STAGES)
-  bool watchSit;    // aturan: true = duduk, false = berdiri
-  uint8_t thrMin;   // ambang aturan (menit)
+  bool watchSit;    // posisi yang sedang dihitung: true = duduk, false = berdiri
+  uint8_t thrSit;   // ambang duduk (menit)
+  uint8_t thrStand; // ambang berdiri (menit)
   uint16_t runMin;  // lama posisi yang diawasi (menit)
   uint16_t queued;  // bacaan belum terkirim
 };
